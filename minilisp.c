@@ -132,7 +132,7 @@ static Obj *make_function(int type, Obj *params, Obj *body, Obj *env) {
 }
 
 static Obj *make_special(int subtype) {
-  Obj *r = malloc(sizeof(void *) * 2);
+  Obj *r = malloc(sizeof(void *) * 2); // why not sizeof(int) ?? sizeof(int) seems ok.
   r->type = TSPECIAL;
   r->subtype = subtype;
   return r;
@@ -197,14 +197,16 @@ static void skip_line(void) {
 // Reads a list. Note that '(' has already been read.
 static Obj *read_list(void) {
   Obj *obj = read();
-  if (!obj)
+  if (!obj) // obj == NULL (if EOF
     error("Unclosed parenthesis");
-  if (obj == Dot)
+  if (obj == Dot) // ?
     error("Stray dot");
-  if (obj == Cparen)
+  if (obj == Cparen) // ? maybe )
     return Nil;
   Obj *head, *tail;
   head = tail = cons(obj, Nil);
+  // head and tail firstly points the same cons cell.
+  // only head is ok? => no
 
   for (;;) {
     Obj *obj = read();
@@ -218,6 +220,8 @@ static Obj *read_list(void) {
 	error("Closed parenthesis expected after dot");
       return head;
     }
+    // main
+    // easy to understand if you ignore above ifs.
     tail->cdr = cons(obj, Nil);
     tail = tail->cdr;
   }
@@ -278,7 +282,7 @@ static Obj *read(void) {
       return Cparen;
     if (c == '.')
       return Dot;
-    if (c == '\'')
+    if (c == '\'') // reader macro '
       return read_quote();
     if (isdigit(c))
       return make_int(read_number(c - '0'));
@@ -382,19 +386,15 @@ static Obj *progn(Obj *env, Obj *list) {
 
 // Evaluates all the list elements and returns their return values as a new list.
 static Obj *eval_list(Obj *env, Obj *list) {
-  Obj *head = NULL;
-  Obj *tail = NULL;
-  for (Obj *lp = list; lp != Nil; lp = lp->cdr) {
-    Obj *tmp = eval(env, lp->car);
-    if (head == NULL) {
-      head = tail = cons(tmp, Nil);
-    } else {
-      tail->cdr = cons(tmp, Nil);
-      tail = tail->cdr;
-    }
-  }
-  if (head == NULL)
+  if (list == Nil)
     return Nil;
+  Obj *head, *tail;
+  head = tail = cons(eval(env,list->car),Nil);
+  for (Obj *lp = list->cdr; lp != Nil; lp = lp->cdr) {
+    Obj *tmp = eval(env, lp->car);
+    tail->cdr = cons(tmp, Nil);
+    tail = tail->cdr;
+  }
   return head;
 }
 
