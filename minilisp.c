@@ -123,6 +123,7 @@ static Obj *make_primitive(Primitive *fn) {
 }
 
 static Obj *make_function(int type, Obj *params, Obj *body, Obj *env) {
+  // used for also macro.
   assert(type == TFUNCTION || type == TMACRO);
   Obj *r = alloc(type, sizeof(Obj *) * 3);
   r->params = params;
@@ -431,7 +432,9 @@ static Obj *find(Obj *env, Obj *sym) {
 }
 
 // Expands the given macro application form.
-static Obj *macroexpand(Obj *env, Obj *obj) {
+// see difference between macroexpand* ref: https://clojuredocs.org/clojure.walk/macroexpand-all#example-542692d7c026201cdc32711f
+// macroexpand-1.
+static Obj *macroexpand_1(Obj *env, Obj *obj) {
   if (obj->type != TCELL || obj->car->type != TSYMBOL)
     return obj;
   Obj *bind = find(env, obj->car);
@@ -444,9 +447,28 @@ static Obj *macroexpand(Obj *env, Obj *obj) {
   Obj *body = bind->cdr->body;
   Obj *params = bind->cdr->params;
   Obj *newenv = push_env(env, params, args);
-  // why progn ???
+  // why progn -> evaluate once.
   return progn(newenv, body);
 }
+
+static Obj *macroexpand(Obj *env, Obj *obj) {
+  if (obj->type != TCELL || obj->car->type != TSYMBOL)
+    return obj;
+  Obj *bind = find(env, obj->car);
+  if (!bind || bind->cdr->type != TMACRO)
+    return obj;
+  Obj *args = obj->cdr;
+  Obj *body = bind->cdr->body;
+  Obj *params = bind->cdr->params;
+  Obj *newenv = push_env(env, params, args);
+  Obj *r = progn(newenv, body);
+  return macroexpand(env,r);
+}
+
+// macroexpand-all
+/* static Obj *macroexpand_all(Obj *env, Obj *obj) { */
+  
+/* } */
 
 // Evaluates the S expression.
 static Obj *eval(Obj *env, Obj *obj) {
@@ -466,7 +488,7 @@ static Obj *eval(Obj *env, Obj *obj) {
   }
   case TCELL: {
     // Function application form
-    Obj *expanded = macroexpand(env, obj);
+    Obj *expanded = macroexpand_1(env, obj);
     if (expanded != obj) // see macroexapnd. macroexpand returns obj itself if it is not a macro form. this if is almost equal to (if (macro? obj) ..)
       return eval(env, expanded); // recursively expand ???
     Obj *fn = eval(env, obj->car);
@@ -546,7 +568,7 @@ static Obj *handle_defun(Obj *env, Obj *list, int type) {
     error("Malformed defun");
   Obj *sym = list->car;
   Obj *rest = list->cdr;
-  Obj *fn = handle_function(env, rest, type); // make function
+  Obj *fn = handle_function(env, rest, type); // make function (used also for macro.)
   add_variable(env, sym, fn);
   return fn;
 }
@@ -568,10 +590,18 @@ static Obj *prim_define(Obj *env, Obj *list) {
 
 // (defmacro <symbol> (<symbol> ...) expr ...)
 static Obj *prim_defmacro(Obj *env, Obj *list) {
+  // macro is just a function.
   return handle_defun(env, list, TMACRO);
 }
 
 // (macroexpand expr)
+static Obj *prim_macroexpand_1(Obj *env, Obj *list) {
+  if (list_length(list) != 1)
+    error("Malformed macroexpand_1");
+  Obj *body = list->car;
+  return macroexpand_1(env, body);
+}
+
 static Obj *prim_macroexpand(Obj *env, Obj *list) {
   if (list_length(list) != 1)
     error("Malformed macroexpand");
@@ -635,6 +665,7 @@ static void define_primitives(Obj *env) {
   add_primitive(env, "define", prim_define);
   add_primitive(env, "defun", prim_defun);
   add_primitive(env, "defmacro", prim_defmacro);
+  add_primitive(env, "macroexpand-1", prim_macroexpand_1);
   add_primitive(env, "macroexpand", prim_macroexpand);
   add_primitive(env, "lambda", prim_lambda);
   add_primitive(env, "if", prim_if);
