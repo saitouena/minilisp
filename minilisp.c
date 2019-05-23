@@ -132,7 +132,7 @@ static Obj *make_function(int type, Obj *params, Obj *body, Obj *env) {
 }
 
 static Obj *make_special(int subtype) {
-  Obj *r = malloc(sizeof(void *) * 2); // why not sizeof(int) ?? sizeof(int) seems ok.
+  Obj *r = malloc(sizeof(int) * 2); // why not sizeof(int) ?? sizeof(int) seems ok.
   r->type = TSPECIAL;
   r->subtype = subtype;
   return r;
@@ -437,10 +437,14 @@ static Obj *macroexpand(Obj *env, Obj *obj) {
   Obj *bind = find(env, obj->car);
   if (!bind || bind->cdr->type != TMACRO)
     return obj;
+  // main
+  // obj->type == TCELL && bind of (bind ...) == TMCRO (where obj == (bind ...))
+  // compare this with apply. Doesn't evaluate args.
   Obj *args = obj->cdr;
   Obj *body = bind->cdr->body;
   Obj *params = bind->cdr->params;
   Obj *newenv = push_env(env, params, args);
+  // why progn ???
   return progn(newenv, body);
 }
 
@@ -463,8 +467,8 @@ static Obj *eval(Obj *env, Obj *obj) {
   case TCELL: {
     // Function application form
     Obj *expanded = macroexpand(env, obj);
-    if (expanded != obj)
-      return eval(env, expanded);
+    if (expanded != obj) // see macroexapnd. macroexpand returns obj itself if it is not a macro form. this if is almost equal to (if (macro? obj) ..)
+      return eval(env, expanded); // recursively expand ???
     Obj *fn = eval(env, obj->car);
     Obj *args = obj->cdr;
     if (fn->type != TPRIMITIVE && fn->type != TFUNCTION)
@@ -515,17 +519,20 @@ static Obj *prim_plus(Obj *env, Obj *list) {
   return make_int(sum);
 }
 
+// check if list are valid and pass list to make_function(makes closure)
 static Obj *handle_function(Obj *env, Obj *list, int type) {
   if (list->type != TCELL || !is_list(list->car) || list->cdr->type != TCELL)
     error("Malformed lambda");
+  // check if params are valid symbol list.
   for (Obj *p = list->car; p != Nil; p = p->cdr) {
     if (p->car->type != TSYMBOL)
       error("Parameter must be a symbol");
     if (!is_list(p->cdr))
       error("Parameter list is not a flat list");
   }
-  Obj *car = list->car;
-  Obj *cdr = list->cdr;
+  // main
+  Obj *car = list->car; // params
+  Obj *cdr = list->cdr; // body
   return make_function(type, car, cdr, env);
 }
 
@@ -539,7 +546,7 @@ static Obj *handle_defun(Obj *env, Obj *list, int type) {
     error("Malformed defun");
   Obj *sym = list->car;
   Obj *rest = list->cdr;
-  Obj *fn = handle_function(env, rest, type);
+  Obj *fn = handle_function(env, rest, type); // make function
   add_variable(env, sym, fn);
   return fn;
 }
