@@ -102,6 +102,10 @@ run macroexpand '(if (= x 0) (print x))' "
   (defmacro if-zero (x then) (list 'if (list '= x 0) then))
   (macroexpand (if-zero x (print x)))"
 
+run macroexpand-all '(if (= x 0) (print x))' "
+  (defmacro if-zero (x then) (list 'if (list '= x 0) then))
+  (macroexpand-all (if-zero x (print x)))"
+
 run macroexpand-1 '(plus 3 4)' "
 (defmacro plus (n1 n2) (list '+ n1 n2))
 (defmacro p1 (p1 p2) (list 'plus p1 p2))
@@ -112,6 +116,28 @@ run macroexpand '(+ 3 4)' "
 (defmacro p1 (p1 p2) (list 'plus p1 p2))
 (macroexpand (p1 3 4))"
 
+run macroexpand-all '(+ 20 (+ 20 30))' "
+(defmacro plus (n1 n2) (list '+ n1 n2))
+(defmacro p1 (p1 p2) (list 'plus p1 p2))
+(defmacro p2 (p1 p2) (list '+ p1 p2))
+(defmacro calc (c1 c2) (list 'p1 c1 (list 'p2 c1 c2)))
+(macroexpand-all (calc 20 30))
+"
+run macroexpand-1 '(p1 20 (p2 20 30))' "
+(defmacro plus (n1 n2) (list '+ n1 n2))
+(defmacro p1 (p1 p2) (list 'plus p1 p2))
+(defmacro p2 (p1 p2) (list '+ p1 p2))
+(defmacro calc (c1 c2) (list 'p1 c1 (list 'p2 c1 c2)))
+(macroexpand-1 (calc 20 30))
+"
+
+run macroexpand '(+ 20 (p2 20 30))' "
+(defmacro plus (n1 n2) (list '+ n1 n2))
+(defmacro p1 (p1 p2) (list 'plus p1 p2))
+(defmacro p2 (p1 p2) (list '+ p1 p2))
+(defmacro calc (c1 c2) (list 'p1 c1 (list 'p2 c1 c2)))
+(macroexpand (calc 20 30))
+"
 
 # Sum from 0 to 10
 run recursion 55 '(defun f (x) (if (= x 0) 0 (+ (f (+ x -1)) x))) (f 10)'

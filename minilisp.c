@@ -466,9 +466,27 @@ static Obj *macroexpand(Obj *env, Obj *obj) {
 }
 
 // macroexpand-all
-/* static Obj *macroexpand_all(Obj *env, Obj *obj) { */
-  
-/* } */
+static Obj *macroexpand_all(Obj *env, Obj *obj);
+
+static Obj *macroexpand_list(Obj *env, Obj *list) {
+  if (list == Nil)
+    return Nil;
+  Obj *head, *tail;
+  head = tail = cons(macroexpand_all(env,list->car),Nil);
+  for (Obj *lp = list->cdr; lp != Nil; lp = lp->cdr) {
+    Obj *tmp = macroexpand_all(env, lp->car);
+    tail->cdr = cons(tmp, Nil);
+    tail = tail->cdr;
+  }
+  return head;
+}
+
+static Obj *macroexpand_all(Obj *env, Obj *obj) {
+  Obj* expanded = macroexpand(env,obj);
+  if(obj == expanded)
+    return obj;
+  return macroexpand_list(env,expanded);
+}
 
 // Evaluates the S expression.
 static Obj *eval(Obj *env, Obj *obj) {
@@ -609,6 +627,14 @@ static Obj *prim_macroexpand(Obj *env, Obj *list) {
   return macroexpand(env, body);
 }
 
+static Obj *prim_macroexpand_all(Obj *env, Obj *list) {
+  if (list_length(list) != 1)
+    error("Malformed macroexpand_all");
+  Obj *body = list->car;
+  return macroexpand_all(env, body);
+}
+
+
 // (println expr)
 static Obj *prim_println(Obj *env, Obj *list) {
   print(eval(env, list->car));
@@ -667,6 +693,7 @@ static void define_primitives(Obj *env) {
   add_primitive(env, "defmacro", prim_defmacro);
   add_primitive(env, "macroexpand-1", prim_macroexpand_1);
   add_primitive(env, "macroexpand", prim_macroexpand);
+    add_primitive(env, "macroexpand-all", prim_macroexpand_all);
   add_primitive(env, "lambda", prim_lambda);
   add_primitive(env, "if", prim_if);
   add_primitive(env, "=", prim_num_eq);
