@@ -447,8 +447,7 @@ static Obj *macroexpand_1(Obj *env, Obj *obj) {
   Obj *body = bind->cdr->body;
   Obj *params = bind->cdr->params;
   Obj *newenv = push_env(env, params, args);
-  // why progn -> evaluate once.
-  return progn(newenv, body);
+  return progn(newenv, body); // this assumes body consists of one expression. this is equivalent to eval(newenv, body->car)
 }
 
 static Obj *macroexpand(Obj *env, Obj *obj) {
@@ -506,11 +505,16 @@ static Obj *eval(Obj *env, Obj *obj) {
   }
   case TCELL: {
     // Function application form
-    Obj *expanded = macroexpand_1(env, obj);
-    if (expanded != obj) // see macroexapnd. macroexpand returns obj itself if it is not a macro form. this if is almost equal to (if (macro? obj) ..)
-      return eval(env, expanded); // recursively expand ???
-    Obj *fn = eval(env, obj->car);
-    Obj *args = obj->cdr;
+    /* Obj *expanded = macroexpand_1(env, obj); */
+    /* if (expanded != obj) // see macroexapnd. macroexpand returns obj itself if it is not a macro form. this if is almost equal to (if (macro? obj) ..) */
+    /*   return eval(env, expanded); // this is equivalent to macroexpand(env, obj) */
+    Obj* expanded = macroexpand(env,obj);
+    if(expanded->type != TCELL) {
+      // expanded expression can be a number. ex. (defmacro seven () 7) (seven)
+      return expanded;
+    }
+    Obj *fn = eval(env, expanded->car);
+    Obj *args = expanded->cdr;
     if (fn->type != TPRIMITIVE && fn->type != TFUNCTION)
       error("The head of a list must be a function");
     return apply(env, fn, args);
@@ -693,7 +697,7 @@ static void define_primitives(Obj *env) {
   add_primitive(env, "defmacro", prim_defmacro);
   add_primitive(env, "macroexpand-1", prim_macroexpand_1);
   add_primitive(env, "macroexpand", prim_macroexpand);
-    add_primitive(env, "macroexpand-all", prim_macroexpand_all);
+  add_primitive(env, "macroexpand-all", prim_macroexpand_all);
   add_primitive(env, "lambda", prim_lambda);
   add_primitive(env, "if", prim_if);
   add_primitive(env, "=", prim_num_eq);
