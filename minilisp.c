@@ -191,7 +191,7 @@ static inline size_t roundup(size_t var, size_t size) {
 static Obj *alloc(void *root, int type, size_t size) {
   // The object must be large enough to contain a pointer for the forwarding pointer. Make it
   // larger if it's smaller than that. ???
-  
+  // for int, symbol type maybe
   size = roundup(size, sizeof(void *));
 
   // Add the size of the type tag and size fields.
@@ -200,6 +200,7 @@ static Obj *alloc(void *root, int type, size_t size) {
   // Round up the object size to the nearest alignment boundary, so that the next object will be
   // allocated at the proper alignment boundary. Currently we align the object at the same
   // boundary as the pointer.
+  // ??? what is this ??? objects is allocated in heap, so stack alignment is not neccesarry, isn't it???
   size = roundup(size, sizeof(void *));
 
   // If the debug flag is on, allocate a new memory space to force all the existing objects to
@@ -216,6 +217,7 @@ static Obj *alloc(void *root, int type, size_t size) {
 
   // Terminate the program if we couldn't satisfy the memory request. This can happen if the
   // requested size was too large or the from-space was filled with too many live objects.
+  // one of the gc Memory exhausted situation. From space is full, and all object is live objects.
   if (MEMORY_SIZE < mem_nused + size)
     error("Memory exhausted");
 
@@ -236,8 +238,8 @@ static Obj *alloc(void *root, int type, size_t size) {
 // to-space. The objects before "scan1" are the objects that are fully copied. The objects between
 // "scan1" and "scan2" have already been copied, but may contain pointers to the from-space. "scan2"
 // points to the beginning of the free space.
-static Obj *scan1;
-static Obj *scan2;
+static Obj *scan1; // scanned pointer
+static Obj *scan2; // unscanned pointer
 
 // Moves one object from the from-space to the to-space. Returns the object's new address. If the
 // object has already been moved, does nothing but just returns the new address.
@@ -265,6 +267,7 @@ static inline Obj *forward(Obj *obj) {
   return newloc;
 }
 
+// see https://linuxjm.osdn.jp/html/LDP_man-pages/man2/mmap.2.html
 static void *alloc_semispace() {
   return mmap(NULL, MEMORY_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
 }
@@ -273,7 +276,8 @@ static void *alloc_semispace() {
 // forward move starts from current frame root.
 static void forward_root_objects(void *root) {
   Symbols = forward(Symbols);
-  for (void **frame = root; frame; frame = *(void ***)frame) // frame = *(void ***)frame what is this??? maybe go to next frame???
+  // end of frames == NULL. see main().
+  for (void **frame = root; frame; frame = *(void ***)frame) // frame = *(void ***)frame what is this??? maybe go to next frame??? よさそう
     for (int i = 1; frame[i] != ROOT_END; i++)
       if (frame[i])
 	frame[i] = forward(frame[i]);
@@ -298,7 +302,11 @@ static void gc(void *root) {
   // Copy the objects referenced by the GC root objects located between scan1 and scan2. Once it's
   // finished, all live objects (i.e. objects reachable from the root) will have been copied to
   // the to-space.
+  // breath first search
+  // ref: https://seesaawiki.jp/w/author_nari/d/GC/standard/Copying
   while (scan1 < scan2) {
+    // "o の子オブジェクト達のうち、未コピーであるものをアドレスunscanned にコピーする(o の子オブジェクト達を灰色にする)。"
+    // "同時に、o 中のポインタがコピー先をさすように書き換え、scanned を進める(o を黒にする)。"
     switch (scan1->type) {
     case TINT:
     case TSYMBOL:
@@ -322,6 +330,7 @@ static void gc(void *root) {
     default:
       error("Bug: copy: unknown type %d", scan1->type);
     }
+    //"scanned を進める(o を黒にする)"
     scan1 = (Obj *)((uint8_t *)scan1 + scan1->size);
   }
 
@@ -381,9 +390,12 @@ struct Obj *make_env(void *root, Obj **vars, Obj **up) {
 
 // Returns ((x . y) . a)
 static Obj *acons(void *root, Obj **x, Obj **y, Obj **a) {
+  // why this uses DEFINE1?
+  // this is not nessesary, i think.
   DEFINE1(cell);
+  //Obj *cell = alloc(root,TCELL,sizeof(Obj*) * 2); -> this is bad.
   *cell = cons(root, x, y);
-  return cons(root, cell, a);
+  return cons(root, cell, a); // this may cause gc, so cell must be a indirect access.
 }
 
 //======================================================================
@@ -469,7 +481,7 @@ static Obj *read_quote(void *root) {
   *sym = intern(root, "quote");
   *tmp = read_expr(root);
   *tmp = cons(root, tmp, &Nil);
-  *tmp = cons(root, sym, tmp);
+  *tmp = cons(root, sym, tmp); // if you don't use DEFINE2, here 'sym' can ponts invalid moved objects.
   return *tmp;
 }
 
@@ -574,6 +586,7 @@ static int length(Obj *list) {
 static Obj *eval(void *root, Obj **env, Obj **obj);
 
 static void add_variable(void *root, Obj **env, Obj **sym, Obj **val) {
+  // DEFINE* is used here. Use indirect access.
   DEFINE2(vars, tmp);
   *vars = (*env)->vars;
   *tmp = acons(root, sym, val, vars);
@@ -834,7 +847,7 @@ static Obj *handle_function(void *root, Obj **env, Obj **list, int type) {
     error("Parameter must be a symbol");
   DEFINE2(params, body);
   *params = (*list)->car;
-  *body = (*list)->cdr;
+  *body = (*list)->cdr; // this DEFINE2 is readlly neccesary ???
   return make_function(root, env, type, params, body);
 }
 
@@ -980,7 +993,7 @@ int main(int argc, char **argv) {
   debug_gc = getEnvFlag("MINILISP_DEBUG_GC");
   always_gc = getEnvFlag("MINILISP_ALWAYS_GC");
   debug_gc=false;
-  always_gc=false;
+  always_gc=true;
   /* printf("debug_gc=%d\n",debug_gc); */
   /* printf("always_gc=%d\n",always_gc); */
 
@@ -992,6 +1005,7 @@ int main(int argc, char **argv) {
   void *root = NULL;
   DEFINE2(env, expr);
   *env = make_env(root, &Nil, &Nil);
+  // these objects will be nerver gc-ed.
   define_constants(root, env);
   define_primitives(root, env);
 
