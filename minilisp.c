@@ -98,6 +98,11 @@ static void error(char *fmt, ...) __attribute((noreturn));
 // Rerefence Counter Implementation
 //======================================================================
 
+// Flags to debug GC
+static bool debug_gc = false;
+
+static void print(Obj *obj);
+
 // recursively decrement reference counter
 // if obj->counter == 0, free it and call decrement_count recursively.
 // TODO: add debugging aid.
@@ -105,9 +110,20 @@ void dec_rc(Obj* obj) {
   // precondition
   assert(obj->counter>=1);
   obj->counter--;
-  if(obj->counter>0)
+  if(obj->counter>0) {
+    if(debug_gc) {
+      printf("object ");
+      print(obj);
+      printf(" counter is %d. Not released.\n", obj->counter);
+    }
     return;
+  }
   // obj->counter == 0
+  if(debug_gc) {
+    printf("object ");
+    print(obj);
+    printf(" counter is 0. Released.\n");
+  }
   switch (obj->type) {
   case TINT:
   case TSYMBOL:
@@ -784,8 +800,19 @@ static void define_primitives(Obj *env) {
 // Entry point
 //======================================================================
 
+// Returns true if the environment variable is defined and not the empty string.
+static bool getEnvFlag(char *name) {
+  char *val = getenv(name);
+  return val && val[0];
+}
+
 int main(int argc, char **argv) {
   // Constants and primitives
+
+  debug_gc = getEnvFlag("MINILISP_DEBUG_GC");
+  if(debug_gc)
+    printf("debug_gc is set\n");
+  
   Nil = make_special(TNIL);
   Dot = make_special(TDOT);
   Cparen = make_special(TCPAREN);
