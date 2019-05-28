@@ -31,7 +31,7 @@ enum {
 enum {
   TNIL = 1,
   TDOT,
-  TCPAREN,
+  TCPAREN, // closed paren ')'
   TTRUE,
 };
 
@@ -45,6 +45,9 @@ typedef struct Obj {
   // The first word of the object represents the type of the object. Any code that handles object
   // needs to check its type first, then access the following union members.
   int type;
+
+  // reference counter
+  int counter;
 
   // Object values.
   union {
@@ -79,6 +82,7 @@ typedef struct Obj {
 } Obj;
 
 // Constants
+// we must allocate valid object for ref counter implementaton simplicity.
 static Obj *Nil;
 static Obj *Dot;
 static Obj *Cparen;
@@ -91,6 +95,76 @@ static Obj *Symbols;
 static void error(char *fmt, ...) __attribute((noreturn));
 
 //======================================================================
+// Rerefence Counter Implementation
+//======================================================================
+
+// recursively decrement reference counter
+// if obj->counter == 0, free it and call decrement_count recursively.
+// TODO: add debugging aid.
+void dec_rc(Obj* obj) {
+  // precondition
+  assert(obj->counter>=1);
+  obj->counter--;
+  if(obj->counter>0)
+    return;
+  // obj->counter == 0
+  switch (obj->type) {
+  case TINT:
+  case TSYMBOL:
+  case TPRIMITIVE:
+    // Any of the above types does not contain a pointer to a GC-managed object.
+    free(obj);
+    return;
+  case TCELL:
+    dec_rc(obj->car);
+    dec_rc(obj->cdr);
+    free(obj);
+    return;
+  case TFUNCTION:
+  case TMACRO:
+    dec_rc(obj->params);
+    dec_rc(obj->body);
+    dec_rc(obj->env);
+    free(obj);
+    return;
+  case TENV:
+    dec_rc(obj->vars);
+    dec_rc(obj->up);
+    free(obj);
+    return;
+  default:
+    error("Bug: dec_rc: unknown type %d", obj->type);
+  }
+}
+
+// TODO: add debugging aid.
+void inc_rc(Obj* obj) {
+  obj->counter++;
+}
+
+// Obj *L, *R;
+// ...
+// don't use l = r.
+// l is valid object pointer.
+// instead use rc_assign(l,r);
+#define RC_ASSIGN(L, R)				\
+  dec_rc(L);					\
+  inc_rc(R);					\
+  L = R;					\
+
+// Obj *L, *R;
+// used when L is newly allocated object
+// and R is valid object.
+#define RC_FRESH_ASSIGN(L, R) \
+  inc_rc(R);		      \
+  L = R;		      \
+
+// Obj* obj;
+// used when ref cnt should be dec-ed because it goes out of scope.
+// typically used in eval.
+#define END_OF_SCOPE(obj) dec_rc(obj);
+
+//======================================================================
 // Constructors
 //======================================================================
 
@@ -101,6 +175,7 @@ static Obj *alloc(int type, size_t size) {
   // Allocate the object.
   Obj *obj = malloc(size);
   obj->type = type;
+  obj->counter=1;
   return obj;
 }
 
@@ -126,30 +201,29 @@ static Obj *make_function(int type, Obj *params, Obj *body, Obj *env) {
   // used for also macro.
   assert(type == TFUNCTION || type == TMACRO);
   Obj *r = alloc(type, sizeof(Obj *) * 3);
-  r->params = params;
-  r->body = body;
-  r->env = env;
+  RC_FRESH_ASSIGN(r->params,params);
+  RC_FRESH_ASSIGN(r->body, body);
+  RC_FRESH_ASSIGN(r->env, env);
   return r;
 }
 
 static Obj *make_special(int subtype) {
-  Obj *r = malloc(sizeof(int) * 2); // why not sizeof(int) ?? sizeof(int) seems ok.
-  r->type = TSPECIAL;
+  Obj *r = alloc(TSPECIAL,sizeof(int)); // this must be valid object for ref cnt impl simplicity. (originally this was malloc allocated object.)
   r->subtype = subtype;
   return r;
 }
 
 struct Obj *make_env(Obj *vars, Obj *up) {
   Obj *r = alloc(TENV, sizeof(Obj *) * 2);
-  r->vars = vars;
-  r->up = up;
+  RC_FRESH_ASSIGN(r->vars,vars);
+  RC_FRESH_ASSIGN(r->up,up);
   return r;
 }
 
 static Obj *cons(Obj *car, Obj *cdr) {
   Obj *cell = alloc(TCELL, sizeof(Obj *) * 2);
-  cell->car = car;
-  cell->cdr = cdr;
+  RC_FRESH_ASSIGN(cell->car,car);
+  RC_FRESH_ASSIGN(cell->cdr,cdr);
   return cell;
 }
 
@@ -205,6 +279,7 @@ static Obj *read_list(void) {
   if (obj == Cparen) // ? maybe )
     return Nil;
   Obj *head, *tail;
+  // 'head' and 'tail' are temporal variable. So we don't need use RC_ASSIGN
   head = tail = cons(obj, Nil);
   // head and tail firstly points the same cons cell.
   // only head is ok? => no
@@ -548,7 +623,7 @@ static Obj *prim_setq(Obj *env, Obj *list) {
   if (!bind)
     error("Unbound variable %s", list->car->name);
   Obj *value = eval(env, list->cdr->car);
-  bind->cdr = value;
+  RC_ASSIGN(bind->cdr,value);
   return value;
 }
 
@@ -717,7 +792,7 @@ int main(int argc, char **argv) {
   True = make_special(TTRUE);
   Symbols = Nil;
 
-  Obj *env = make_env(Nil, NULL);
+  Obj *env = make_env(Nil, Nil);
 
   define_constants(env);
   define_primitives(env);
@@ -733,5 +808,6 @@ int main(int argc, char **argv) {
       error("Stray dot");
     print(eval(env, expr));
     printf("\n");
+    END_OF_SCOPE(expr);
   }
 }

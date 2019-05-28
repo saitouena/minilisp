@@ -3,7 +3,6 @@
 function fail() {
   echo -n -e '\e[1;31m[ERROR]\e[0m '
   echo "$1"
-  exit 1
 }
 
 function do_run() {
